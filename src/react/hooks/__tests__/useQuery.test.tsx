@@ -15,7 +15,13 @@ import { InMemoryCache } from '../../../cache';
 import { ApolloProvider } from '../../context';
 import { Observable, Reference, concatPagination } from '../../../utilities';
 import { ApolloLink } from '../../../link/core';
-import { itAsync, MockLink, MockedProvider, mockSingleLink } from '../../../testing';
+import {
+  itAsync,
+  MockLink,
+  MockedProvider,
+  mockSingleLink,
+  MockSubscriptionLink,
+} from '../../../testing';
 import { useQuery } from '../useQuery';
 import { useMutation } from '../useMutation';
 
@@ -3673,5 +3679,87 @@ describe('useQuery Hook', () => {
       "network-only",
       "cache-and-network",
     ));
+  });
+
+  describe.only("defer/stream", () => {
+    it('should handle deferred queries', async () => {
+      const query = gql`
+        {
+          greeting {
+            message
+            ... on Greeting @defer {
+              recipient {
+                name
+              }
+            }
+          }
+        }
+      `;
+
+      const link = new MockSubscriptionLink();
+
+      const client = new ApolloClient({
+        link,
+        cache: new InMemoryCache(),
+      });
+
+      const { result, waitForNextUpdate } = renderHook(
+        () => useQuery(query),
+        {
+          wrapper: ({ children }) => (
+            <ApolloProvider client={client}>
+              {children}
+            </ApolloProvider>
+          ),
+        },
+      );
+
+      expect(result.current.loading).toBe(true);
+      expect(result.current.data).toBe(undefined);
+      setTimeout(() => {
+        link.simulateResult({
+          result: {
+            data: {
+              greeting: {
+                message: "Hello world",
+              },
+            }
+          },
+        });
+      });
+
+      await waitForNextUpdate();
+      expect(result.current.loading).toBe(false);
+      expect(result.current.data).toEqual({
+        greeting: {
+          message: "Hello world",
+        },
+      });
+
+      setTimeout(() => {
+        debugger;
+        link.simulateResult({
+          result: {
+            data: {
+              recipient: {
+                name: "Alice",
+              },
+            },
+            path: ["greeting"],
+          },
+        });
+      });
+
+      await waitForNextUpdate();
+      expect(result.current.loading).toBe(false);
+      expect(result.current.data).toEqual({
+        greeting: {
+          message: "Hello world",
+          recipient: {
+            name: "Alice",
+          },
+        },
+      });
+    });
   });
 });
